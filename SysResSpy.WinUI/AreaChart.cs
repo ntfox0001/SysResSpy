@@ -179,7 +179,7 @@ namespace SysResSpy.WinUI
                     StrokeThickness = 1
                 };
                 Children.Add(line);
-                double val = (1 - frac) * yRange;
+                double val = frac * yRange;
                 string txt = _bytesMode ? Format.Bytes(val) : Format.Number(val);
                 var lbl = new TextBlock
                 {
