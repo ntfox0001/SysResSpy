@@ -120,21 +120,21 @@
                                         <ColumnDefinition Width="70"/>
                                         <ColumnDefinition Width="86"/>
                                     </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="{x:Bind Name}" FontSize="12"
+                                    <TextBlock Grid.Column="0" Text="{x:Bind Name, Mode=OneWay}" FontSize="12"
                                                TextTrimming="CharacterEllipsis"
                                                VerticalAlignment="Center"/>
-                                    <TextBlock Grid.Column="1" Text="{x:Bind PidText}" FontSize="12"
+                                    <TextBlock Grid.Column="1" Text="{x:Bind PidText, Mode=OneWay}" FontSize="12"
                                                TextAlignment="Right" VerticalAlignment="Center"
                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                                    <TextBlock Grid.Column="2" Text="{x:Bind CpuText}" FontSize="12"
+                                    <TextBlock Grid.Column="2" Text="{x:Bind CpuText, Mode=OneWay}" FontSize="12"
                                                TextAlignment="Right" VerticalAlignment="Center"
                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                                    <TextBlock Grid.Column="3" Text="{x:Bind MemText}" FontSize="12"
+                                    <TextBlock Grid.Column="3" Text="{x:Bind MemText, Mode=OneWay}" FontSize="12"
                                                TextAlignment="Right" VerticalAlignment="Center"/>
-                                    <TextBlock Grid.Column="4" Text="{x:Bind CpuPeakText}" FontSize="12"
+                                    <TextBlock Grid.Column="4" Text="{x:Bind CpuPeakText, Mode=OneWay}" FontSize="12"
                                                TextAlignment="Right" VerticalAlignment="Center"
                                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
-                                    <TextBlock Grid.Column="5" Text="{x:Bind MemPeakText}" FontSize="12"
+                                    <TextBlock Grid.Column="5" Text="{x:Bind MemPeakText, Mode=OneWay}" FontSize="12"
                                                TextAlignment="Right" VerticalAlignment="Center"
                                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
                                 </Grid>
