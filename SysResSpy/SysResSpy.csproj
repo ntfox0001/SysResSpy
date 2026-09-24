@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>SysResSpy</AssemblyName>
+    <RootNamespace>SysResSpy</RootNamespace>
+    <ApplicationHighDpiMode>SystemAware</ApplicationHighDpiMode>
+    <SupportedOSPlatformVersion>7.0</SupportedOSPlatformVersion>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+</Project>

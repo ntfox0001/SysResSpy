@@ -1,0 +1,49 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Publish single-file (WinUI3)
+        run: |
+          dotnet publish "SysResSpy.WinUI\SysResSpy.WinUI.csproj" `
+            -c Release -p:Platform=x64 -r win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:IncludeNativeLibrariesForSelfExtract=true `
+            -p:EnableCompressionInSingleFile=true `
+            -o "dist"
+        shell: pwsh
+
+      - name: Archive dist
+        run: Compress-Archive -Path "dist\*" -DestinationPath "SysResSpy-win-x64.zip"
+        shell: pwsh
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          prerelease: false
+          files: |
+            SysResSpy-win-x64.zip
+          generate_release_notes: true
+          name: SysResSpy ${{ github.ref_name }}
+          tag_name: ${{ github.ref }}

@@ -1,0 +1,48 @@
+# --- Build outputs ---
+bin/
+obj/
+dist/
+out/
+publish/
+*.user
+
+# --- Visual Studio / Rider ---
+.vs/
+.vscode/
+.idea/
+*.suo
+*.userosscache
+*.sln.docstates
+
+# --- Windows App SDK / WinUI ---
+*.appx
+*.appxbundle
+*.msix
+*.msixbundle
+*.pri
+AppPackages/
+BundleArtifacts/
+
+# --- Logs ---
+*.log
+Debug/
+logs/
+
+# --- Project scratch / diagnostics ---
+winui_shot.png
+xamlerr.txt
+xamlout.txt
+debug.log
+capture.ps1
+_*.ps1
+
+# --- Diagnostic / temp files ---
+__pycache__/
+*.pyc
+Thumbs.db
+Desktop.ini
+*.tmp
+*_Proj.txt
+
+# --- OS ---
+.DS_Store
