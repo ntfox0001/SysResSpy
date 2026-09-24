@@ -24,6 +24,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Brings in System.Windows.Automation (UIAutomationClient) for locating the
+         Doubao input box, mirroring the DirSize approach. Only the UIA client is
+         used; no WPF UI is instantiated. -->
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Reuse the existing sampling engine unchanged (namespace SysResSpy.Sampling). -->
     <Compile Include="..\SysResSpy\Sampling\ProcessSampler.cs" Link="Sampling\ProcessSampler.cs" />
   </ItemGroup>
