@@ -44,9 +44,9 @@ namespace SysResSpy.WinUI
             _uiTimer.Tick += (s, e) => RefreshUi();
             _uiTimer.Start();
 
-            // Enable grouping by default. Setting IsOn here (after all members are
-            // constructed) fires OnGroupToggled, which performs the initial refresh.
-            GroupToggle.IsOn = true;
+            // Enable grouping by default. Setting IsChecked here (after all members
+            // are constructed) fires OnGroupToggled, which performs the initial refresh.
+            GroupToggle.IsChecked = true;
 
             RefreshUi();
             UpdateHeaders();
@@ -58,7 +58,7 @@ namespace SysResSpy.WinUI
 
         private void OnGroupToggled(object sender, RoutedEventArgs e)
         {
-            _groupByName = GroupToggle.IsOn == true;
+            _groupByName = GroupToggle.IsChecked == true;
             _rowsByKey.Clear();
             ProcessList.Items.Clear();
             RefreshUi();
