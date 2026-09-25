@@ -47,3 +47,16 @@ jobs:
           generate_release_notes: true
           name: SysResSpy ${{ github.ref_name }}
           tag_name: ${{ github.ref }}
+
+      - name: Delete old releases (keep only this one)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $releases = gh release list --limit 100 --json tagName
+          $names = ($releases | ConvertFrom-Json) | Where-Object { $_.tagName -ne $tag } | ForEach-Object { $_.tagName }
+          foreach ($n in $names) {
+            Write-Host "Deleting old release: $n"
+            gh release delete $n --yes --cleanup-tag
+          }
