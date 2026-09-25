@@ -30,9 +30,4 @@
     <FrameworkReference Include="Microsoft.WindowsDesktop.App" />
   </ItemGroup>
 
-  <ItemGroup>
-    <!-- Reuse the existing sampling engine unchanged (namespace SysResSpy.Sampling). -->
-    <Compile Include="..\SysResSpy\Sampling\ProcessSampler.cs" Link="Sampling\ProcessSampler.cs" />
-  </ItemGroup>
-
 </Project>
