@@ -21,7 +21,7 @@ namespace SysResSpy.Sampling
     /// <summary>Ring-buffered history for one process.</summary>
     public sealed class ProcessHistory
     {
-        public const int Capacity = 600; // max samples kept (600 * intervalMs)
+        public const int Capacity = 3600; // max samples kept (3600 * intervalMs = 1 hour)
 
         public int Id;
         public string Name;
