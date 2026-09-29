@@ -20,10 +20,39 @@ namespace SysResSpy.WinUI
 
         public string Key { get; }
 
+        private int _gen;
+        private bool _isClosed;
+        private string _displayName;
+
+        public int Gen => _gen;
+
+        public bool IsClosed
+        {
+            get => _isClosed;
+            set
+            {
+                if (_isClosed != value) { _isClosed = value; UpdateDisplayName(); }
+            }
+        }
+
+        public string DisplayName
+        {
+            get => _displayName;
+            private set { if (_displayName != value) { _displayName = value; OnPropertyChanged(nameof(DisplayName)); } }
+        }
+
         public string Name
         {
             get => _name;
-            set { if (_name != value) { _name = value; OnPropertyChanged(nameof(Name)); } }
+            set
+            {
+                if (_name != value) { _name = value; UpdateDisplayName(); }
+            }
+        }
+
+        private void UpdateDisplayName()
+        {
+            DisplayName = _isClosed ? _name + "（已关闭）" : _name;
         }
 
         public string PidText
@@ -79,6 +108,8 @@ namespace SysResSpy.WinUI
         public void Apply(ProcessSnapshot snap)
         {
             Name = snap.Name;
+            _gen = snap.Gen;
+            IsClosed = !snap.Active;
             Cpu = snap.CpuPercent;
             WorkingSet = snap.WorkingSet;
             CpuPeak = snap.CpuPeak;

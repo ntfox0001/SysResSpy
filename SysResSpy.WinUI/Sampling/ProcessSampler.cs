@@ -10,10 +10,12 @@ namespace SysResSpy.Sampling
     {
         public int Id;
         public string Name;
-        public float CpuPercent;   // 0..100 (sum across cores view: % of a single core)
-        public long WorkingSet;    // bytes
-        public float CpuPeak;      // highest CpuPercent seen since process/group appeared
-        public long WorkingSetPeak; // highest WorkingSet seen since process/group appeared
+        public float CpuPercent;     // 0..100 (% of a single core); 0 if the process is closed
+        public long WorkingSet;      // bytes; 0 if the process is closed
+        public float CpuPeak;        // peak within the configured peak window
+        public long WorkingSetPeak;  // peak within the configured peak window
+        public bool Active;          // false => process existed earlier but has exited (retained)
+        public int Gen;              // generation for name grouping (resets on restart of the same name)
     }
 
     /// <summary>Ring-buffered history for one process.</summary>
@@ -23,6 +25,7 @@ namespace SysResSpy.Sampling
 
         public int Id;
         public string Name;
+        public int Gen;            // generation: same name restarted => +1, new independent entry
         public readonly float[] Cpu = new float[Capacity];
         public readonly long[] WorkingSet = new long[Capacity];
         public readonly long[] Ticks = new long[Capacity]; // Environment.TickCount64 per sample
@@ -44,6 +47,7 @@ namespace SysResSpy.Sampling
         private readonly object _lock = new object();
         private readonly Dictionary<int, ProcessHistory> _history = new Dictionary<int, ProcessHistory>();
         private readonly Dictionary<string, ProcessHistory> _historyByName = new Dictionary<string, ProcessHistory>();
+        private readonly Dictionary<string, int> _genByName = new Dictionary<string, int>(); // current live generation per name
         private readonly Dictionary<int, TimeSpan> _prevCpuTotal = new Dictionary<int, TimeSpan>();
         private readonly Dictionary<int, long> _prevWallMs = new Dictionary<int, long>();
 
@@ -51,10 +55,22 @@ namespace SysResSpy.Sampling
         private int _intervalMs = 1000;
         private volatile bool _started;
         private long _lastTickMs;
+        private long _peakWindowMs;   // 0 => unlimited (peak over entire retained history)
 
         public event Action<ProcessSampler> SamplesUpdated;
 
         public int IntervalMs { get => _intervalMs; set { _intervalMs = Math.Max(250, value); } }
+
+        /// <summary>Window over which the CPU/memory peaks are computed. 0 = unlimited.</summary>
+        public long PeakWindowMs
+        {
+            get => _peakWindowMs;
+            set
+            {
+                var clamped = Math.Max(0L, value);
+                lock (_lock) _peakWindowMs = clamped;
+            }
+        }
 
         public ProcessSampler()
         {
@@ -93,6 +109,41 @@ namespace SysResSpy.Sampling
             }
         }
 
+        /// <summary>Composite key for a named group at a given generation.</summary>
+        private static string ByKey(string name, int gen) => name + "\u0001" + gen.ToString();
+
+        /// <summary>
+        /// Recompute the CPU/working-set peaks for <paramref name="h"/> by scanning
+        /// its ring buffer within the current peak window (oldest allowed = now -
+        /// PeakWindowMs, or all samples if the window is unlimited).
+        /// </summary>
+        private void UpdatePeak(ProcessHistory h, long nowMs)
+        {
+            long window = _peakWindowMs;
+            long oldest = window > 0 ? nowMs - window : long.MinValue;
+            float cpuMax = 0f;
+            long wsMax = 0L;
+            long allowed = oldest;
+            int n = Math.Min(h.Count, ProcessHistory.Capacity);
+            int idx = (h.Head - 1 + ProcessHistory.Capacity) % ProcessHistory.Capacity;
+            // Ring buffer holds samples newest-to-oldest; walk back while within
+            // the window. Since Count never exceeds Capacity, a full loop is safe.
+            for (int k = 0; k < n; k++)
+            {
+                long t = h.Ticks[idx];
+                if (t >= allowed)
+                {
+                    float c = h.Cpu[idx];
+                    if (c > cpuMax) cpuMax = c;
+                    long ws = h.WorkingSet[idx];
+                    if (ws > wsMax) wsMax = ws;
+                }
+                idx = (idx - 1 + ProcessHistory.Capacity) % ProcessHistory.Capacity;
+            }
+            h.CpuPeak = cpuMax;
+            h.WorkingSetPeak = wsMax;
+        }
+
         private void OnTick()
         {
             try { SampleOnce(); }
@@ -114,17 +165,20 @@ namespace SysResSpy.Sampling
 
             lock (_lock)
             {
-                // Purge entries for processes that no longer exist to avoid stale memory.
+                // Retain history for processes that no longer exist (mark them
+                // inactive) so the UI can show a "(closed)" row. Only drop CPU
+                // deltas we no longer need.
                 if (procs.Length != 0)
                 {
-                    var stale = new List<int>();
+                    var present = new HashSet<int>();
+                    foreach (Process p in procs) present.Add(p.Id);
                     foreach (int pid in _history.Keys)
-                    {
-                        bool seen = false;
-                        foreach (Process p in procs) { if (p.Id == pid) { seen = true; break; } }
-                        if (!seen) stale.Add(pid);
-                    }
-                    foreach (int pid in stale) { _history.Remove(pid); _prevCpuTotal.Remove(pid); _prevWallMs.Remove(pid); }
+                        if (!present.Contains(pid))
+                        {
+                            if (_history.TryGetValue(pid, out ProcessHistory hx)) hx.Active = false;
+                            _prevCpuTotal.Remove(pid);
+                            _prevWallMs.Remove(pid);
+                        }
                 }
 
                 // Per-name aggregation for this tick (sum CPU% and memory across
@@ -181,8 +235,7 @@ namespace SysResSpy.Sampling
                         h.Ticks[h.Head] = nowMs;
                         h.Head = (h.Head + 1) % ProcessHistory.Capacity;
                         if (h.Count < ProcessHistory.Capacity) h.Count++;
-                        if (cpuPct > h.CpuPeak) h.CpuPeak = cpuPct;
-                        if (ws > h.WorkingSetPeak) h.WorkingSetPeak = ws;
+                        UpdatePeak(h, nowMs);
 
                         // Aggregate into name buckets.
                         if (aggCpu.TryGetValue(name, out float c)) aggCpu[name] = c + cpuPct; else aggCpu[name] = cpuPct;
@@ -196,13 +249,18 @@ namespace SysResSpy.Sampling
                 }
 
                 // Write one combined sample per active name to the by-name history.
+                foreach (string name in aggCpu.Keys)
+                    if (!_genByName.ContainsKey(name)) _genByName[name] = 0;
+
                 foreach (KeyValuePair<string, float> kv in aggCpu)
                 {
                     string name = kv.Key;
-                    if (!_historyByName.TryGetValue(name, out ProcessHistory nh))
+                    int gen = _genByName[name];
+                    string key = ByKey(name, gen);
+                    if (!_historyByName.TryGetValue(key, out ProcessHistory nh))
                     {
-                        nh = new ProcessHistory { Name = name, Id = aggPids[name], StartTick = nowMs };
-                        _historyByName[name] = nh;
+                        nh = new ProcessHistory { Name = name, Gen = gen, Id = aggPids[name], StartTick = nowMs };
+                        _historyByName[key] = nh;
                     }
                     nh.Name = name;
                     nh.Active = true;
@@ -211,17 +269,20 @@ namespace SysResSpy.Sampling
                     nh.Ticks[nh.Head] = nowMs;
                     nh.Head = (nh.Head + 1) % ProcessHistory.Capacity;
                     if (nh.Count < ProcessHistory.Capacity) nh.Count++;
-                    if (kv.Value > nh.CpuPeak) nh.CpuPeak = kv.Value;
-                    if (aggWs[name] > nh.WorkingSetPeak) nh.WorkingSetPeak = aggWs[name];
+                    UpdatePeak(nh, nowMs);
+                    if (nh.Id != aggPids[name]) nh.Id = aggPids[name];
                 }
-                // Remove by-name entries whose processes have all exited, and mark empty ones inactive.
-                var deadNames = new List<string>();
-                foreach (KeyValuePair<string, ProcessHistory> kv in _historyByName)
+                // Mark name-groups that lost all their processes as inactive AND bump
+                // their generation, so the same name restarting later shows up as a
+                // brand-new entry (fresh curve + peak) instead of resuming the old one.
+                foreach (string name in new List<string>(_genByName.Keys))
                 {
-                    if (!aggCpu.ContainsKey(kv.Key)) { deadNames.Add(kv.Key); }
-                    else { kv.Value.Active = aggPids.ContainsKey(kv.Key); }
+                    if (aggCpu.ContainsKey(name)) continue;
+                    int gen = _genByName[name];
+                    if (_historyByName.TryGetValue(ByKey(name, gen), out ProcessHistory hx))
+                        hx.Active = false;
+                    _genByName[name] = gen + 1;
                 }
-                foreach (string name in deadNames) _historyByName.Remove(name);
             }
 
             SamplesUpdated?.Invoke(this);
@@ -236,14 +297,16 @@ namespace SysResSpy.Sampling
                 foreach (ProcessHistory h in _history.Values)
                 {
                     int i = h.Count > 0 ? (h.Head - 1 + ProcessHistory.Capacity) % ProcessHistory.Capacity : 0;
+                    bool active = h.Active;
                     list.Add(new ProcessSnapshot
                     {
                         Id = h.Id,
                         Name = h.Name,
-                        CpuPercent = h.Cpu[i],
-                        WorkingSet = h.WorkingSet[i],
+                        CpuPercent = active ? h.Cpu[i] : 0f,
+                        WorkingSet = active ? h.WorkingSet[i] : 0L,
                         CpuPeak = h.CpuPeak,
-                        WorkingSetPeak = h.WorkingSetPeak
+                        WorkingSetPeak = h.WorkingSetPeak,
+                        Active = active
                     });
                 }
             }
@@ -289,14 +352,17 @@ namespace SysResSpy.Sampling
                 foreach (ProcessHistory h in _historyByName.Values)
                 {
                     int i = h.Count > 0 ? (h.Head - 1 + ProcessHistory.Capacity) % ProcessHistory.Capacity : 0;
+                    bool active = h.Active;
                     list.Add(new ProcessSnapshot
                     {
                         Id = h.Id,
                         Name = h.Name,
-                        CpuPercent = h.Cpu[i],
-                        WorkingSet = h.WorkingSet[i],
+                        CpuPercent = active ? h.Cpu[i] : 0f,
+                        WorkingSet = active ? h.WorkingSet[i] : 0L,
                         CpuPeak = h.CpuPeak,
-                        WorkingSetPeak = h.WorkingSetPeak
+                        WorkingSetPeak = h.WorkingSetPeak,
+                        Active = active,
+                        Gen = h.Gen
                     });
                 }
             }
@@ -305,14 +371,14 @@ namespace SysResSpy.Sampling
         }
 
         /// <summary>Copy of a name-grouped history (oldest-first) for the UI thread.</summary>
-        public bool TryGetHistoryByName(string name, out ProcessHistory clone)
+        public bool TryGetHistoryByName(string name, int gen, out ProcessHistory clone)
         {
             clone = null;
             lock (_lock)
             {
-                if (_historyByName.TryGetValue(name, out ProcessHistory h))
+                if (_historyByName.TryGetValue(ByKey(name, gen), out ProcessHistory h))
                 {
-                    clone = new ProcessHistory { Id = h.Id, Name = h.Name, Count = h.Count, Head = h.Head, Active = h.Active, StartTick = h.StartTick };
+                    clone = new ProcessHistory { Id = h.Id, Name = h.Name, Gen = h.Gen, Count = h.Count, Head = h.Head, Active = h.Active, StartTick = h.StartTick };
                     if (h.Count > 0)
                     {
                         Array.Copy(h.Cpu, clone.Cpu, h.Cpu.Length);

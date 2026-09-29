@@ -64,6 +64,21 @@ namespace SysResSpy.WinUI
             RefreshUi();
         }
 
+        private void OnPeakWindowChanged(object sender, SelectionChangedEventArgs e)
+        {
+            // 0 = unlimited, 1 = 30s, 2 = 2min, 3 = 10min
+            long ms;
+            switch (PeakWindowCombo.SelectedIndex)
+            {
+                case 1: ms = 30_000; break;
+                case 2: ms = 2 * 60_000; break;
+                case 3: ms = 10 * 60_000; break;
+                default: ms = 0; break; // unlimited
+            }
+            _sampler.PeakWindowMs = ms;
+            StatusText.Text = $"峰值范围已设为 {((PeakWindowCombo.SelectedItem as ComboBoxItem)?.Content?.ToString() ?? "无限制")}";
+        }
+
         private void OnSortName(object sender, RoutedEventArgs e) => SortBy(0);
         private void OnSortPid(object sender, RoutedEventArgs e) => SortBy(1);
         private void OnSortCpu(object sender, RoutedEventArgs e) => SortBy(2);
@@ -216,6 +231,11 @@ namespace SysResSpy.WinUI
 
         private int CompareRows(ProcessRow a, ProcessRow b)
         {
+            // Closed processes sink below running ones for every sort key, so the
+            // live status is always visually separated from exited history.
+            if (a.IsClosed != b.IsClosed)
+                return a.IsClosed ? 1 : -1;
+
             int r;
             switch (_sortColumn)
             {
@@ -267,30 +287,28 @@ namespace SysResSpy.WinUI
 
         private ProcessHistory FetchHistory(ProcessRow row)
         {
-            string payload = PayloadOf(row.Key);
             if (_groupByName)
-                return _sampler.TryGetHistoryByName(FindGroupedName(payload), out ProcessHistory h) ? h : null;
+                return _sampler.TryGetHistoryByName(row.Name, row.Gen, out ProcessHistory h) ? h : null;
             else
+            {
+                string payload = PayloadOf(row.Key);
                 return int.TryParse(payload, out int pid) && _sampler.TryGetHistory(pid, out ProcessHistory hp) ? hp : null;
+            }
         }
 
-        private string KeyOf(ProcessSnapshot p) => _groupByName ? "N|" + p.Name.ToLowerInvariant() : "P|" + p.Id;
+        private string KeyOf(ProcessSnapshot p) => _groupByName ? "N|" + p.Name.ToLowerInvariant() + "|" + p.Gen : "P|" + p.Id;
         private string PayloadOf(string key) { int i = key.IndexOf('|'); return i < 0 ? key : key.Substring(i + 1); }
 
         private string PidTextOf(ProcessSnapshot p)
         {
             if (!_groupByName) return p.Id.ToString();
             int n = 0;
+            // Count only currently-running instances of this name.
             foreach (ProcessSnapshot pp in _sampler.GetProcesses())
-                if (string.Equals(pp.Name, p.Name, StringComparison.OrdinalIgnoreCase)) n++;
-            return n > 1 ? "×" + n : p.Id.ToString();
-        }
-
-        private string FindGroupedName(string lowerName)
-        {
-            foreach (ProcessSnapshot pp in _sampler.GetProcessesGrouped())
-                if (pp.Name.ToLowerInvariant() == lowerName) return pp.Name;
-            return lowerName;
+                if (pp.Active && string.Equals(pp.Name, p.Name, StringComparison.OrdinalIgnoreCase)) n++;
+            if (p.Active) return n > 1 ? "×" + n : p.Id.ToString();
+            // Closed row: no live instances remain.
+            return "-";
         }
     }
 }
