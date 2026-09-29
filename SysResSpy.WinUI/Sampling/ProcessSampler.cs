@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Threading;
 
 namespace SysResSpy.Sampling
@@ -47,9 +48,14 @@ namespace SysResSpy.Sampling
         private readonly object _lock = new object();
         private readonly Dictionary<int, ProcessHistory> _history = new Dictionary<int, ProcessHistory>();
         private readonly Dictionary<string, ProcessHistory> _historyByName = new Dictionary<string, ProcessHistory>();
-        private readonly Dictionary<string, int> _genByName = new Dictionary<string, int>(); // current live generation per name
+        private Dictionary<string, int> _genByName = new Dictionary<string, int>(); // current live generation per name
         private readonly Dictionary<int, TimeSpan> _prevCpuTotal = new Dictionary<int, TimeSpan>();
         private readonly Dictionary<int, long> _prevWallMs = new Dictionary<int, long>();
+
+        // Keep only the most notable EXITED entries: the top-N survivors by CPU peak
+        // and the top-N by memory peak (union of both sets, so at most 2N closed rows
+        // survive). Running processes are always retained.
+        private const int TopPeakKeep = 10;
 
         private Timer _timer;
         private int _intervalMs = 1000;
@@ -283,9 +289,55 @@ namespace SysResSpy.Sampling
                         hx.Active = false;
                     _genByName[name] = gen + 1;
                 }
+
+                EvictInactive(nowMs);
             }
 
             SamplesUpdated?.Invoke(this);
+        }
+
+        /// <summary>
+        /// Bound memory growth by keeping only the most notable EXITED entries: the
+        /// union of the top-N by CPU peak and the top-N by memory peak. Running
+        /// processes are never removed. PID entries and by-name (name+generation)
+        /// entries are handled independently. No-op until more than 2N closed rows
+        /// exist, so normal ticks stay cheap.
+        /// </summary>
+        private void EvictInactive(long nowMs)
+        {
+            int maxKeep = 2 * TopPeakKeep;
+
+            var inactive = _history.Where(p => !p.Value.Active).ToList();
+            if (inactive.Count > maxKeep)
+            {
+                var keep = inactive.OrderByDescending(p => p.Value.CpuPeak).Take(TopPeakKeep)
+                            .Select(p => p.Key)
+                            .Concat(inactive.OrderByDescending(p => p.Value.WorkingSetPeak).Take(TopPeakKeep)
+                            .Select(p => p.Key))
+                            .ToHashSet();
+                foreach (var kv in inactive)
+                {
+                    if (keep.Contains(kv.Key)) continue;
+                    _history.Remove(kv.Key);
+                    _prevCpuTotal.Remove(kv.Key);
+                    _prevWallMs.Remove(kv.Key);
+                }
+            }
+
+            var inactiveByName = _historyByName.Where(p => !p.Value.Active).ToList();
+            if (inactiveByName.Count > maxKeep)
+            {
+                var keep = inactiveByName.OrderByDescending(p => p.Value.CpuPeak).Take(TopPeakKeep)
+                            .Select(p => p.Key)
+                            .Concat(inactiveByName.OrderByDescending(p => p.Value.WorkingSetPeak).Take(TopPeakKeep)
+                            .Select(p => p.Key))
+                            .ToHashSet();
+                foreach (var kv in inactiveByName)
+                {
+                    if (keep.Contains(kv.Key)) continue;
+                    _historyByName.Remove(kv.Key);
+                }
+            }
         }
 
         /// <summary>Active processes with their latest sample, sorted by name.</summary>
